@@ -5,16 +5,38 @@ namespace Openl10n\Cli;
 use Openl10n\Cli\Command as Command;
 use Openl10n\Cli\DependencyInjection\Configuration;
 use Openl10n\Cli\DependencyInjection\Extension;
+use Openl10n\Cli\Listener;
 use Symfony\Component\Config\Definition\Processor;
 use Symfony\Component\Console\Application as BaseApplication;
+use Symfony\Component\Console\Command\Command as BaseCommand;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\EventDispatcher\EventDispatcher;
+use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\Yaml\Yaml;
 
 class Application extends BaseApplication
 {
-    const DEFAULT_FILENAME = 'openl10n.yml';
+    const CONFIG_FILENAME = 'openl10n.yml';
 
     protected $container;
+    protected $workingDir;
+
+    /**
+     * {@inheritdoc}
+     */
+    public function __construct($name = 'UNKNOWN', $version = 'UNKNOWN')
+    {
+        parent::__construct($name, $version);
+
+        $dispatcher = new EventDispatcher();
+        $this->initListeners($dispatcher);
+
+        $this->setDispatcher($dispatcher);
+        $this->workingDir = getcwd();
+    }
 
     public function getContainer()
     {
@@ -25,6 +47,35 @@ class Application extends BaseApplication
         return $this->container;
     }
 
+    public function getWorkingDirectory()
+    {
+        return $this->workingDir;
+    }
+
+    public function setWorkingDirectory($workingDir)
+    {
+        if (!is_dir($workingDir)) {
+            throw new \RuntimeException(sprintf('%s is not a valid directory', $workingDir));
+        }
+
+        $this->workingDir = $workingDir;
+    }
+
+    /**
+     * Lookup for current configuration file.
+     *
+     * @param string $filename Filename to search
+     *
+     * @return string The full filepath of the configuration
+     */
+    public function getConfigPathname()
+    {
+        return $this->workingDir.'/'.self::CONFIG_FILENAME;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
     protected function getDefaultCommands()
     {
         return array_merge(parent::getDefaultCommands(), array(
@@ -32,6 +83,23 @@ class Application extends BaseApplication
             new Command\PullCommand(),
             new Command\PushCommand(),
         ));
+    }
+
+    /**
+     * Add event subscribers to dispatcher.
+     *
+     * @param EventDispatcherInterface $dispatcher
+     */
+    protected function initListeners(EventDispatcherInterface $dispatcher)
+    {
+        $listeners = [
+            new Listener\WorkingDirectoryListener()
+        ];
+
+        foreach ($listeners as $listener) {
+            $listener->setApplication($this);
+            $dispatcher->addSubscriber($listener);
+        }
     }
 
     /**
@@ -56,6 +124,10 @@ class Application extends BaseApplication
             array('openl10n' => $rawConfig)
         );
 
+        // Register current application instance
+        $this->container->set('openl10n.application', $this);
+
+        // Load each extension
         foreach ($config as $name => $parameters) {
             $extensions[$name]->load($parameters, $this->container);
         }
@@ -68,30 +140,12 @@ class Application extends BaseApplication
      */
     protected function getRawConfig()
     {
-        $filepath = $this->lookupFile();
+        $filepath = $this->getConfigPathname();
 
-        if (false === $filepath) {
+        if (!file_exists($filepath)) {
             throw new \RuntimeException('Unable to find a configuration file');
         }
 
         return Yaml::parse(file_get_contents($filepath));
-    }
-
-    /**
-     * Lookup for current configuration file.
-     *
-     * @param string $filename Filename to search
-     *
-     * @return string The full filepath of the configuration
-     */
-    protected function lookupFile($filename = self::DEFAULT_FILENAME)
-    {
-        $filepath = getcwd().'/'.$filename;
-
-        if (!file_exists($filepath)) {
-            return false;
-        }
-
-        return $filepath;
     }
 }
