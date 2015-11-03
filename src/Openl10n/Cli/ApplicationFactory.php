@@ -46,6 +46,7 @@ class ApplicationFactory
             new Command\InitCommand(),
             new Command\PullCommand(),
             new Command\PushCommand(),
+            new Command\SelfUpdateCommand()
         ];
     }
 
@@ -60,6 +61,7 @@ class ApplicationFactory
             new Extension\ProjectExtension(),
             new Extension\FilesExtension(),
             new Extension\OptionsExtension(),
+            new Extension\SelfUpdateExtension()
         ];
     }
 
